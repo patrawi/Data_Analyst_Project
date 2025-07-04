@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
@@ -8,7 +9,20 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
 from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, accuracy_score, f1_score, precision_score, recall_score
 
-def evaluation_model(model_name, model,y_test,X_test):
+def cap_outliers_iqr(df_column):
+
+    q1 = df_column.quantile(0.25)
+    q3 = df_column.quantile(0.75)
+    IQR = q3 - q1
+    lower_bound = q1 - 1.5*IQR
+    higher_bound = q3+ 1.5*IQR
+
+    capped_column = np.where(df_column < lower_bound, lower_bound, df_column)
+    print(capped_column)
+    capped_column = np.where(capped_column > higher_bound, higher_bound, capped_column)
+    return pd.Series(capped_column, index = df_column.index)
+
+def evaluation_model(model_name,model,y_test, X_test):
     y_pred = model.predict(X_test)
     cm = confusion_matrix(y_test, y_pred)
     print(f'Model : {model_name}')
@@ -26,71 +40,39 @@ def evaluation_model(model_name, model,y_test,X_test):
         print("ROC AUC Score: Not available (model does not provide probabilities directly).")
     print(f"{'='*50}\n")
 
-def logistic_regression_model(df_X_scaled, y):
-    X_trained, X_test, y_trained, y_test = train_test_split(df_X_scaled, y, test_size = 0.2, train_size=0.8, random_state = 42)
-
-    lr = LogisticRegression(random_state = 42, max_iter= 1000)
-    lr.fit(X_trained, y_trained)
-
-    evaluation_model('Logistic Regression',lr,y_test, X_test)
-    return
-
-def decision_tree_model(df_X_scaled, y):
-    X_trained, X_test, y_trained, y_test = train_test_split(df_X_scaled, y, test_size = 0.2, train_size=0.8, random_state = 42)
-
-    clf = DecisionTreeClassifier(random_state=42)
-
-
-    clf.fit(X_trained,y_trained)
-
-    evaluation_model('Decision Tree',clf, y_test, X_test)
-    return
-
-def random_forest_model(df_X_scaled, y):
-
-    X_trained, X_test, y_trained, y_test = train_test_split(df_X_scaled, y, test_size = 0.2, train_size=0.8, random_state = 42)
-
-    rfc = RandomForestClassifier(random_state = 42)
-    rfc.fit(X_trained, y_trained)
-
-    evaluation_model('Random Forest',rfc, y_test, X_test)
-    return
-
-def knn_model(df_X_scaled, y):
-    X_trained, X_test, y_trained, y_test = train_test_split(df_X_scaled, y, test_size = 0.2, train_size=0.8, random_state = 42)
-
-    knn = KNeighborsClassifier()
-    knn.fit(X_trained,y_trained)
-
-    evaluation_model('K-nearest neighbourhood', knn ,y_test, X_test)
-    return
-
-def svc_model(df_X_scaled, y):
-    X_trained, X_test,  y_trained, y_test = train_test_split(df_X_scaled, y, test_size = 0.2, train_size=0.8, random_state = 42)
-    svc = SVC(random_state = 42, probability=True)
-    svc.fit(X_trained, y_trained)
-
-    evaluation_model('Support Vector Machines', svc,y_test, X_test)
-    return
-
-
-
 
 def main():
-    df = pd.read_csv('framingham.csv', decimal=',', sep=',', header =0)
+    try :
+        df = pd.read_csv('framingham.csv', decimal=',', sep=',', header =0)
+    except FileNotFoundError:
+        print("Error: 'framingham.csv' not found. Please try again!")
+        return
+
     df.dropna(inplace=True)
     print(df['TenYearCHD'].value_counts(normalize=True))
-    y = df['TenYearCHD']
-    X = df[['male', 'age', 'cigsPerDay' , 'totChol', 'sysBP', 'glucose' ]]
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-    df_X_scaled = pd.DataFrame(X_scaled, columns =X.columns)
+    df['sysBP'] = pd.to_numeric(df['sysBP'])
 
-    logistic_regression_model(df_X_scaled, y)
-    decision_tree_model(df_X_scaled,y)
-    random_forest_model(df_X_scaled,y)
-    knn_model(df_X_scaled, y)
-    svc_model(df_X_scaled,y)
+
+    features = ['male', 'age', 'cigsPerDay' , 'totChol', 'sysBP', 'glucose' ]
+    y = df['TenYearCHD']
+    X_processed = df[features].copy()
+    for col in features:
+            X_processed[col] = cap_outliers_iqr(X_processed[col])
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X_processed)
+    df_X_scaled = pd.DataFrame(X_scaled, columns =X_processed.columns)
+    X_trained, X_test, y_trained, y_test = train_test_split(df_X_scaled, y, test_size = 0.2, train_size=0.8, random_state = 42)
+    models = {
+        'Logistic Regression': LogisticRegression(random_state=42, max_iter=1000),
+        'Decision Tree': DecisionTreeClassifier(random_state=42),
+        'Random Forest': RandomForestClassifier(random_state=42),
+        'K-Nearest Neighbors': KNeighborsClassifier(),
+        'Support Vector Machine': SVC(random_state=42, probability=True)
+    }
+    for model_name, model in models.items():
+        model.fit(X_trained, y_trained)
+
+        evaluation_model(model_name, model, y_test,X_test)
 
 
 if __name__ == "__main__":
